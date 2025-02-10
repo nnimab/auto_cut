@@ -4,10 +4,24 @@ import shutil
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                            QPushButton, QLabel, QFileDialog, QProgressBar,
                            QListWidget, QHBoxLayout, QSpinBox, QDoubleSpinBox,
-                           QGroupBox, QFormLayout, QMessageBox)
+                           QGroupBox, QFormLayout, QMessageBox, QTextEdit)
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 import logging
 from video_processor import process_video
+
+# 創建自定義的日誌處理器
+class QTextEditLogger(logging.Handler):
+    def __init__(self, text_widget):
+        super().__init__()
+        self.text_widget = text_widget
+        self.text_widget.setReadOnly(True)
+        # 設置格式
+        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+        self.setFormatter(formatter)
+
+    def emit(self, record):
+        msg = self.format(record)
+        self.text_widget.append(msg)
 
 # 設置日誌
 logging.basicConfig(level=logging.INFO)
@@ -75,13 +89,16 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("自動影片剪輯工具")
-        self.setMinimumSize(800, 600)
+        self.setMinimumSize(1000, 800)  # 增加視窗大小以容納日誌區域
         
         # 主要佈局
         main_widget = QWidget()
         self.setCentralWidget(main_widget)
-        layout = QHBoxLayout()
-        main_widget.setLayout(layout)
+        main_layout = QVBoxLayout()  # 改為垂直佈局
+        main_widget.setLayout(main_layout)
+        
+        # 上方操作區域
+        upper_layout = QHBoxLayout()
         
         # 左側面板 - 檔案列表和控制項
         left_panel = QWidget()
@@ -96,10 +113,13 @@ class MainWindow(QMainWindow):
         # 檔案控制按鈕
         file_buttons = QHBoxLayout()
         self.add_btn = QPushButton("添加影片")
+        self.add_folder_btn = QPushButton("添加資料夾")
         self.remove_btn = QPushButton("移除選中")
         self.add_btn.clicked.connect(self.add_files)
+        self.add_folder_btn.clicked.connect(self.add_folder)
         self.remove_btn.clicked.connect(self.remove_selected)
         file_buttons.addWidget(self.add_btn)
+        file_buttons.addWidget(self.add_folder_btn)
         file_buttons.addWidget(self.remove_btn)
         left_layout.addLayout(file_buttons)
         
@@ -135,7 +155,7 @@ class MainWindow(QMainWindow):
         self.process_btn.setEnabled(False)
         left_layout.addWidget(self.process_btn)
         
-        layout.addWidget(left_panel)
+        upper_layout.addWidget(left_panel)
         
         # 右側面板 - 進度顯示
         right_panel = QWidget()
@@ -145,11 +165,28 @@ class MainWindow(QMainWindow):
         self.progress_widgets = {}
         right_layout.addStretch()
         
-        layout.addWidget(right_panel)
+        upper_layout.addWidget(right_panel)
         
         # 設置左右比例為1:1
-        layout.setStretch(0, 1)
-        layout.setStretch(1, 1)
+        upper_layout.setStretch(0, 1)
+        upper_layout.setStretch(1, 1)
+        
+        main_layout.addLayout(upper_layout)
+        
+        # 添加日誌顯示區域
+        log_group = QGroupBox("處理日誌")
+        log_layout = QVBoxLayout()
+        self.log_text = QTextEdit()
+        log_layout.addWidget(self.log_text)
+        log_group.setLayout(log_layout)
+        main_layout.addWidget(log_group)
+        
+        # 設置上下區域的比例（上方操作區域:下方日誌區域 = 2:1）
+        main_layout.setStretch(0, 2)
+        main_layout.setStretch(1, 1)
+        
+        # 設置日誌處理器
+        self.setup_logger()
         
         self.processors = {}
         
@@ -339,6 +376,52 @@ class MainWindow(QMainWindow):
             processor.wait()
         
         event.accept()
+
+    def add_folder(self):
+        """添加資料夾中的所有影片檔案"""
+        folder_path = QFileDialog.getExistingDirectory(
+            self,
+            "選擇包含影片的資料夾",
+            "",
+            QFileDialog.Option.ShowDirsOnly
+        )
+        
+        if not folder_path:
+            return
+            
+        # 支援的影片格式
+        video_extensions = ('.mp4', '.avi', '.mov', '.mkv')
+        
+        # 遍歷資料夾中的所有檔案
+        for root, _, files in os.walk(folder_path):
+            for file in files:
+                if file.lower().endswith(video_extensions):
+                    file_path = os.path.join(root, file)
+                    # 檢查是否已經在列表中
+                    if not self.file_list.findItems(file_path, Qt.MatchFlag.MatchExactly):
+                        self.file_list.addItem(file_path)
+        
+        # 更新開始處理按鈕的狀態
+        self.process_btn.setEnabled(self.file_list.count() > 0)
+        
+        # 如果有新增檔案，顯示提示訊息
+        count = self.file_list.count()
+        if count > 0:
+            QMessageBox.information(
+                self,
+                "添加完成",
+                f"已添加 {count} 個影片檔案到處理列表中。",
+                QMessageBox.StandardButton.Ok
+            )
+
+    def setup_logger(self):
+        """設置日誌處理器"""
+        # 創建並添加自定義的日誌處理器
+        log_handler = QTextEditLogger(self.log_text)
+        logging.getLogger().addHandler(log_handler)
+        
+        # 記錄初始化訊息
+        logging.info("應用程式已啟動")
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
